@@ -1,0 +1,4 @@
+[13:25:25] Request: /
+[13:25:26] Request: /favicon.ico
+[21:12:29] Request: /
+[21:12:30] Request: /favicon.ico
