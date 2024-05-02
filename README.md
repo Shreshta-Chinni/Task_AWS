@@ -412,72 +412,207 @@ Step-7:-Create a Load Balancer (Optional):
 By following these steps, you can manually set up a VPC, subnets, route tables, and EC2 instances using the AWS Management Console. Optionally, you can also create a load balancer to distribute traffic across multiple instances.
 
 ## Implementing Load Balancer, VPC, Subnets, Route Tables, and EC2 Instances manually using the Terraform
-Step 1: Create a VPC
+
+This Terraform script automates the deployment of Linux instances behind an AWS Application Load Balancer (ALB). It sets up the necessary infrastructure components, including VPC, subnets, security groups, ALB, target groups, and EC2 instances. The deployed instances run a basic web server using Apache HTTP Server to serve web content.
+
+
+
+#### Step 1: alb.tf - Application Load Balancer Configuration
+
 ```
-resource "aws_vpc" "myvpc" {
-    cidr_block = "10.0.0.0/16"
-    tags = {
-        Name = "MyVPC"
-    }
+resource "aws_lb_target_group" "tg" {
+  health_check {
+    interval            = "10"
+    path                = "/"
+    protocol            = "HTTP"
+    timeout             = "5"
+    healthy_threshold   = "5"
+    unhealthy_threshold = "2"
+  }
+  name         = "target-group"
+  port         = "80"
+  protocol     = "HTTP"
+  target_type  = "instance"
+  vpc_id       = aws_vpc.vpc.id
 }
-```
-
-This code block creates a Virtual Private Cloud (VPC) with the CIDR block `10.0.0.0/16` and assigns the name tag "MyVPC" to it.
-
-Step 2: Create a Public Subnet
 
 ```
-resource "aws_subnet" "PublicSubnet" {
-    vpc_id            = aws_vpc.myvpc.id
-    availability_zone = "ap-south-1a"
-    cidr_block        = "10.0.1.0/24"
+
+* Configures an AWS Application Load Balancer (ALB) to distribute incoming traffic across EC2 instances.
+* Specifies the ALB's name, type, subnets, security groups, and tags for identification.
+* Sets up a listener to forward HTTP requests from port 80 to the associated target group.
+
+#### Step-2:internet_gateway.tf - Internet Gateway Configuration
+
+```
+resource "aws_internet_gateway" "igw" {
+  vpc_id = aws_vpc.vpc.id
+  tags = {
+    Name = "IGWLoadbalancer"
+  }
 }
-```
-This code block creates a public subnet within the VPC specified by `aws_vpc.myvpc.id` in availability zone `ap-south-1a` with the CIDR block `10.0.1.0/24`.
 
-Step 3: Create a Private Subnet
 ```
-resource "aws_subnet" "PrivSubnet" {
-    vpc_id                  = aws_vpc.myvpc.id
-    cidr_block              = "10.0.2.0/24"
-    map_public_ip_on_launch = true
+* Defines an AWS Internet Gateway and associates it with the VPC to enable internet connectivity for instances.
+* Adds tags to label the Internet Gateway for better management and identification within the infrastructure.
+* Establishes the connection between the VPC and the Internet Gateway to facilitate outbound internet access.
+#### Step-3:instances.tf - EC2 Instances Configuration
+
+```
+resource "aws_instance" "ec2" {
+  ami = "ami-013e83f579886baeb"
+  instance_type = "t2.micro"
+  subnet_id = aws_subnet.subnet1.id
+  user_data = file("shell.sh")
+  vpc_security_group_ids = [aws_security_group.sgforinstance.id]
+  tags = {
+    Name = "LB-EC2"
+  }
 }
-```
-
-This code block creates a private subnet within the VPC specified by `aws_vpc.myvpc.id` with the CIDR block `10.0.2.0/24` and enables the option to map public IP on launch.
-
-Step 4: Create an Internet Gateway (IGW)
-```
-resource "aws_internet_gateway" "myIgw" {
-    vpc_id = aws_vpc.myvpc.id
+resource "aws_instance" "ec21" {
+  ami = "ami-013e83f579886baeb"
+  instance_type = "t2.micro"
+  subnet_id = aws_subnet.subnet1.id
+  user_data = file("shell.sh")
+  vpc_security_group_ids = [aws_security_group.sgforinstance.id]
+  tags = {
+    Name = "LB-EC21"
+  }
 }
-```
-This code block creates an internet gateway (IGW) and attaches it to the VPC specified by `aws_vpc.myvpc.id`.
 
-Step 5: Create Route Tables for Public Subnet
+
 ```
-resource "aws_route_table" "PublicRT" {
-    vpc_id = aws_vpc.myvpc.id
-    route {
-        cidr_block = "0.0.0.0/0"
-        gateway_id = aws_internet_gateway.myIgw.id
-    }
+
+* Creates EC2 instances with specified AMI, instance type, subnet, security group, and user data script.
+* Tags the instances for identification and categorization within the AWS environment.
+* Sets up Apache HTTP Server on the instances using the provided user data script (shell.sh) for serving web content.
+
+#### Step-4:shell.sh - User Data Script
+
+```
+#!/bin/bash
+sudo yum install httpd -y
+sudo systemctl start httpd
+sudo systemctl enable httpd
+sudo echo "<h1>Hello from$(hostname)</h1>" > /var/www/html/index.html
+
+```
+
+* Bash script executed during instance initialization to install and configure Apache HTTP Server.
+* Installs necessary packages, starts the HTTP service, and enables it to run automatically on system boot.
+* Creates a basic HTML file with a hostname tag to serve as the web content for the deployed instances.
+
+#### Step-5:load_balancer.tf - Load Balancer Configuration
+```
+resource "aws_lb" "application-lb" {
+  name = "aws-alb"
+  internal = false
+  ip_address_type = "ipv4"
+  load_balancer_type = "application"
+  security_groups = [aws_security_group.sgforloadbalancer.id]
+  subnets = [aws_subnet.subnet1.id,aws_subnet.subnet2.id]
+  tags = {
+    Name = "aws-alb"
+  }
 }
-```
-This code block creates a route table for the public subnet and adds a route to it for all traffic `(0.0.0.0/0)` to go through the internet gateway `(aws_internet_gateway.myIgw.id)`.
-
-Step 6: Route Table Association for Public Subnet
 
 ```
-resource "aws_route_table_association" "PublicRTAssociation" {
-    subnet_id      = aws_subnet.PublicSubnet.id
-    route_table_id = aws_route_table.PublicRT.id
+
+* Defines an AWS Application Load Balancer (ALB) with specified attributes such as name, type, subnets, and security groups.
+* Ensures proper routing of incoming HTTP requests to target instances using a configured target group.
+* Adds tags for easy identification and management of the ALB within the AWS environment.
+#### Step-6:output.tf - Output Configuration
+
+```
+output "aws_lb_arn" {
+  value = aws_lb.application-lb.id
 }
+
+output "aws_lb_pub_dns" {
+  value = aws_lb.application-lb.dns_name
+}
+
 ```
 
-This code block associates the previously created route table `(aws_route_table.PublicRT.id)` with the public subnet `(aws_subnet.PublicSubnet.id)`, enabling the subnet to use the defined routes.
+* Specifies outputs to display after Terraform execution, including the ALB's ARN and public DNS name.
+* Provides essential information for accessing the deployed infrastructure components, facilitating post-deployment tasks.
+* Enables users to easily identify and utilize the created resources for further configurations or integrations.
 
- By executing this code,we can the necessary networking components to build the infrastructure.
+#### Step-7:subnet.tf - Subnet Configuration
+
+```
+resource "aws_subnet" "subnet1" {
+  vpc_id                  = aws_vpc.vpc.id
+  availability_zone       = "ap-south-1a"
+  map_public_ip_on_launch = true
+  cidr_block             = "10.0.0.0/25"
+  tags = {
+    Name = "Loadbalancer_subnet_1"
+  }
+}
+
+resource "aws_subnet" "subnet2" {
+  vpc_id                  = aws_vpc.vpc.id
+  availability_zone       = "ap-south-1b"
+  map_public_ip_on_launch = true
+  cidr_block             = "10.0.0.128/25"
+  tags = {
+    Name = "Loadbalancer_subnet_2"
+  }
+}
 
 
+```
 
+* Defines subnets within the VPC, specifying the CIDR block, availability zone, and enabling public IP mapping.
+* Tags the subnets for identification and categorization, enhancing manageability in a multi-subnet environment.
+* Ensures proper network segmentation and resource placement across different availability zones for fault tolerance.
+
+#### Step-8:target_group_attachment.tf - Target Group Attachment Configuration
+
+```
+resource "aws_lb_target_group_attachment" "tg-attach" {
+  target_group_arn = aws_lb_target_group.tg.arn
+  target_id        = aws_instance.ec2.id
+}
+
+resource "aws_lb_target_group_attachment" "tg-attach1" {
+  target_group_arn = aws_lb_target_group.tg.arn
+  target_id        = aws_instance.ec21.id
+}
+
+
+```
+* Attaches EC2 instances to the specified target group within the ALB configuration.
+* Associates instances with the ALB to receive and process incoming HTTP requests.
+* Ensures proper load distribution and high availability by distributing traffic across multiple instances.
+
+#### Step-9:vpc.tf - VPC Configuration
+
+```
+resource "aws_vpc" "vpc" {
+  cidr_block = "10.0.0.0/24"
+  tags = {
+    Name = "Loadbalancer_VPC"
+  }
+}
+
+
+```
+
+* Sets up an AWS Virtual Private Cloud (VPC) with a defined CIDR block for private networking.
+* Adds tags to label the VPC for better organization and management of cloud resources.
+* Creates a secure and isolated network environment for deploying EC2 instances and other AWS resources.
+
+### Testing
+
+
+* Obtain the DNS name of your load balancer from the Terraform output.
+* Open a web browser and navigate to the load balancer's DNS name.
+* Verify that the application loads successfully in the browser.
+* Monitor traffic distribution across instances for load balancing effectiveness.
+
+
+### CONCLUSION
+
+The deployment of the application on AWS with load balancing has been successfully configured and tested. Accessing the application through the load balancer's DNS name confirms its functionality, while monitoring ensures effective traffic distribution across instances, validating the robustness of the setup.
